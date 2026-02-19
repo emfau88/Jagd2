@@ -1,3 +1,4 @@
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
@@ -5,7 +6,6 @@ const elCoins = document.getElementById("coins");
 const elPressure = document.getElementById("pressure");
 const elTod = document.getElementById("tod");
 const elWind = document.getElementById("wind");
-const elState = document.getElementById("state");
 const elPop = document.getElementById("pop");
 const elPrompt = document.getElementById("promptText");
 const elHint = document.getElementById("hintText");
@@ -14,22 +14,31 @@ const btnPrimary = document.getElementById("btnPrimary");
 const btnSecondary = document.getElementById("btnSecondary");
 
 function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  // use device pixels for crispness
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.floor(window.innerWidth * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
 }
 resize();
 window.addEventListener("resize", resize);
 
-// ---------- Background Image ----------
-const BG_URL = "https://raw.githubusercontent.com/emfau88/Jagd2/refs/heads/main/bg.png";
-const bgImg = new Image();
-bgImg.crossOrigin = "anonymous";
-let bgReady = false;
-bgImg.onload = () => { bgReady = true; };
-bgImg.onerror = () => { bgReady = false; };
-bgImg.src = BG_URL;
+// ---------------- Background ----------------
+// FIXED URL (the refs/heads variant is often not a direct raw file)
+const BG_URL = "https://raw.githubusercontent.com/emfau88/Jagd2/main/bg.png";
 
-// Draw cover (center-crop) helper
+const bgImg = new Image();
+let bgReady = false;
+let bgFailed = false;
+
+bgImg.onload = () => { bgReady = true; bgFailed = false; };
+bgImg.onerror = () => { bgReady = false; bgFailed = true; };
+
+// cache-bust so you see updates immediately
+bgImg.src = BG_URL + "?v=" + Date.now();
+
 function drawImageCover(img, x, y, w, h) {
   const iw = img.naturalWidth || img.width;
   const ih = img.naturalHeight || img.height;
@@ -38,80 +47,44 @@ function drawImageCover(img, x, y, w, h) {
   const scale = Math.max(w / iw, h / ih);
   const sw = w / scale;
   const sh = h / scale;
-
   const sx = (iw - sw) / 2;
   const sy = (ih - sh) / 2;
 
   ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
 }
 
-// ---------- State ----------
-const S = {
-  PREPARE: "PREPARE",
-  WAIT: "WAIT",
-  ENCOUNTER: "ENCOUNTER",
-  RESULT: "RESULT",
-};
+// ---------------- State ----------------
+const S = { PREPARE:"PREPARE", WAIT:"WAIT", ENCOUNTER:"ENCOUNTER", RESULT:"RESULT" };
 let STATE = S.PREPARE;
 
-// ---------- Revier Model ----------
+// ---------------- Model ----------------
 let revier = {
   population: { deer: 12, boar: 6, duck: 18 },
   pressure: 0,
-  foodSpots: 1,
-  saltSpots: 1,
   coins: 100,
-  timeMin: 6 * 60, // 06:00
+  timeMin: 6 * 60,
   windDir: "NE",
-  zoneName: "Lichtung",
 };
 
-// ---------- Save/Load (minimal, opt-in) ----------
+// ---------------- Save/Load ----------------
 const SAVE_KEY = "jagd2_revier_save_v1";
 function saveGame() {
-  const data = {
-    revier,
-    ts: Date.now(),
-  };
-  localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ revier, ts: Date.now() })); }
+  catch {}
 }
 function loadGame() {
-  const raw = localStorage.getItem(SAVE_KEY);
-  if (!raw) return false;
   try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
     const data = JSON.parse(raw);
-    if (!data?.revier) return false;
-    revier = data.revier;
-    return true;
-  } catch {
-    return false;
-  }
+    if (data?.revier) revier = data.revier;
+  } catch {}
 }
-// Auto-load on start (safe)
 loadGame();
 
-// ---------- Particles (subtle atmosphere) ----------
-const dust = [];
-function initDust(count = 28) {
-  dust.length = 0;
-  for (let i = 0; i < count; i++) {
-    dust.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: 0.8 + Math.random() * 1.8,
-      a: 0.05 + Math.random() * 0.08,
-      vx: -6 + Math.random() * 12,
-      vy: -4 + Math.random() * 8,
-    });
-  }
-}
-initDust();
-
-// ---------- Encounter ----------
+// ---------------- Encounter ----------------
 let encounter = null;
 let encounterTimer = 0;
-let resultText = "";
-let promptPulse = 0;
 
 function fmtTime(min) {
   const h = String(Math.floor(min / 60)).padStart(2, "0");
@@ -120,89 +93,81 @@ function fmtTime(min) {
 }
 
 function rollEncounterType() {
-  // simple weighted by population
   const pool = [];
   const { deer, boar, duck } = revier.population;
-  for (let i = 0; i < deer; i++) pool.push("deer");
-  for (let i = 0; i < boar; i++) pool.push("boar");
-  for (let i = 0; i < duck; i++) pool.push("duck");
+  for (let i=0;i<deer;i++) pool.push("deer");
+  for (let i=0;i<boar;i++) pool.push("boar");
+  for (let i=0;i<duck;i++) pool.push("duck");
   return pool[Math.floor(Math.random() * pool.length)] || "deer";
 }
 
 function startEncounter() {
   STATE = S.ENCOUNTER;
-  const type = rollEncounterType();
 
+  const type = rollEncounterType();
   encounter = {
     type,
-    x: canvas.width * 0.5,
-    y: canvas.height * 0.60,
-    scale: 0.52,
-    alive: true,
+    x: window.innerWidth * 0.5,
+    y: window.innerHeight * 0.62,
+    scale: 0.55,
     wobble: Math.random() * Math.PI * 2,
   };
-
   encounterTimer = 7.0;
 
   elPrompt.textContent =
-    type === "deer"
-      ? "Begegnung: Reh — entscheiden."
-      : type === "boar"
-      ? "Begegnung: Wildschwein — Risiko."
-      : "Begegnung: Ente — klein & flink.";
+    type === "deer" ? "Begegnung: Reh — entscheiden."
+    : type === "boar" ? "Begegnung: Wildschwein — Risiko."
+    : "Begegnung: Ente — klein & flink.";
 
   elHint.textContent = "Im Encounter: links = Verschonen, rechts = Schießen";
+  syncButtons();
 }
 
 function toResult(text) {
   STATE = S.RESULT;
-  resultText = text;
   encounter = null;
   elPrompt.textContent = text + " (Weiter)";
   elHint.textContent = "Weiter tippen";
   saveGame();
+  syncButtons();
 }
 
-// ---------- Actions ----------
-btnPrimary.addEventListener("click", () => {
+// ---------------- Actions ----------------
+function primaryAction() {
   if (STATE === S.PREPARE) {
     STATE = S.WAIT;
     elPrompt.textContent = "Ansitz… ruhig bleiben.";
     elHint.textContent = "Warte kurz auf eine Begegnung";
-    // schedule encounter
+    syncButtons();
+
     setTimeout(() => {
       if (STATE === S.WAIT) startEncounter();
-    }, 1100);
-  } else if (STATE === S.ENCOUNTER) {
+    }, 900);
+    return;
+  }
+
+  if (STATE === S.ENCOUNTER) {
     shoot();
-  } else if (STATE === S.RESULT) {
+    return;
+  }
+
+  if (STATE === S.RESULT) {
     STATE = S.PREPARE;
     elPrompt.textContent = "Tippe „Vorbereiten“";
     elHint.textContent = "Vorbereiten → Warten → Begegnung → Entscheidung";
+    syncButtons();
+    return;
   }
-  syncButtons();
-});
+}
 
-btnSecondary.addEventListener("click", () => {
+function secondaryAction() {
   if (STATE === S.ENCOUNTER) {
     spare();
-  } else {
-    // Info
-    elPrompt.textContent =
-      "Loop: Vorbereiten → Warten → Begegnung → Entscheidung. Druck steigt bei Abschuss.";
-    elHint.textContent = "Tipp: Verschonen senkt Druck";
+    return;
   }
-  syncButtons();
-});
-
-// Tap on canvas: left half = spare, right half = shoot (nur im Encounter)
-canvas.addEventListener("click", (e) => {
-  if (STATE !== S.ENCOUNTER) return;
-  const x = e.clientX;
-  if (x < canvas.width * 0.5) spare();
-  else shoot();
-  syncButtons();
-});
+  elPrompt.textContent = "Loop: Vorbereiten → Warten → Begegnung → Entscheidung. Druck steigt bei Abschuss.";
+  elHint.textContent = "Tipp: Verschonen senkt Druck";
+}
 
 function shoot() {
   if (STATE !== S.ENCOUNTER || !encounter) return;
@@ -211,16 +176,9 @@ function shoot() {
   let gain = 0;
   let pressureGain = 0.10;
 
-  if (type === "deer") {
-    gain = 25; pressureGain = 0.10;
-    revier.population.deer = Math.max(0, revier.population.deer - 1);
-  } else if (type === "boar") {
-    gain = 35; pressureGain = 0.14;
-    revier.population.boar = Math.max(0, revier.population.boar - 1);
-  } else {
-    gain = 15; pressureGain = 0.06;
-    revier.population.duck = Math.max(0, revier.population.duck - 2);
-  }
+  if (type === "deer") { gain = 25; pressureGain = 0.10; revier.population.deer = Math.max(0, revier.population.deer - 1); }
+  else if (type === "boar") { gain = 35; pressureGain = 0.14; revier.population.boar = Math.max(0, revier.population.boar - 1); }
+  else { gain = 15; pressureGain = 0.06; revier.population.duck = Math.max(0, revier.population.duck - 2); }
 
   revier.coins += gain;
   revier.pressure += pressureGain;
@@ -242,24 +200,50 @@ function syncButtons() {
   if (STATE === S.PREPARE) {
     btnPrimary.textContent = "Vorbereiten";
     btnSecondary.textContent = "Info";
-    btnSecondary.classList.add("secondary");
   } else if (STATE === S.WAIT) {
-    btnPrimary.textContent = "…";
+    btnPrimary.textContent = "Warten…";
     btnSecondary.textContent = "Info";
-    btnSecondary.classList.add("secondary");
   } else if (STATE === S.ENCOUNTER) {
     btnPrimary.textContent = "Schießen (rechts)";
     btnSecondary.textContent = "Verschonen (links)";
-    btnSecondary.classList.add("secondary");
   } else if (STATE === S.RESULT) {
     btnPrimary.textContent = "Weiter";
     btnSecondary.textContent = "Info";
-    btnSecondary.classList.add("secondary");
   }
 }
+
+btnPrimary.addEventListener("pointerdown", (e) => { e.preventDefault(); primaryAction(); }, { passive: false });
+btnSecondary.addEventListener("pointerdown", (e) => { e.preventDefault(); secondaryAction(); }, { passive: false });
+
+// Tap on canvas during encounter (left/right decision)
+canvas.addEventListener("pointerdown", (e) => {
+  if (STATE !== S.ENCOUNTER) return;
+  e.preventDefault();
+  const x = e.clientX;
+  if (x < window.innerWidth * 0.5) spare();
+  else shoot();
+}, { passive: false });
+
 syncButtons();
 
-// ---------- Update Loop ----------
+// ---------------- Atmosphere ----------------
+const dust = [];
+function initDust(n = 24) {
+  dust.length = 0;
+  for (let i = 0; i < n; i++) {
+    dust.push({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      r: 0.8 + Math.random() * 1.6,
+      a: 0.05 + Math.random() * 0.07,
+      vx: -6 + Math.random() * 12,
+      vy: -4 + Math.random() * 8,
+    });
+  }
+}
+initDust();
+
+// ---------------- Loop ----------------
 let last = 0;
 function loop(t) {
   const dt = (t - last) / 1000;
@@ -267,37 +251,30 @@ function loop(t) {
 
   update(dt);
   draw();
+
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 
 function update(dt) {
-  // time progresses slowly
   revier.timeMin = (revier.timeMin + dt * 2) % (24 * 60);
 
-  // prompt pulse for "alive" feeling
-  promptPulse += dt * 1.6;
-
-  // encounter "approach"
   if (STATE === S.ENCOUNTER && encounter) {
     encounter.scale += dt * 0.06;
     encounter.wobble += dt * 2.2;
-
     encounterTimer -= dt;
     if (encounterTimer <= 0) {
       toResult("Chance verpasst (zu lange gezögert)");
     }
   }
 
-  // dust drift
   for (const p of dust) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-
-    if (p.x < -20) p.x = canvas.width + 20;
-    if (p.x > canvas.width + 20) p.x = -20;
-    if (p.y < -20) p.y = canvas.height + 20;
-    if (p.y > canvas.height + 20) p.y = -20;
+    if (p.x < -20) p.x = window.innerWidth + 20;
+    if (p.x > window.innerWidth + 20) p.x = -20;
+    if (p.y < -20) p.y = window.innerHeight + 20;
+    if (p.y > window.innerHeight + 20) p.y = -20;
   }
 
   // HUD
@@ -305,14 +282,13 @@ function update(dt) {
   elPressure.textContent = revier.pressure.toFixed(2);
   elTod.textContent = fmtTime(Math.floor(revier.timeMin));
   elWind.textContent = revier.windDir;
-  elState.textContent = STATE;
-
   elPop.textContent = `D${revier.population.deer} B${revier.population.boar} E${revier.population.duck}`;
 }
 
-// ---------- Draw ----------
 function draw() {
   drawBackground();
+
+  // subtle haze & dust
   drawAtmosphere();
 
   if (STATE === S.ENCOUNTER && encounter) {
@@ -320,46 +296,48 @@ function draw() {
     drawAnimalPlaceholder(encounter);
     drawScopeOverlay();
   } else {
-    // subtle vignette even outside encounter
-    drawVignette(0.35);
+    drawVignette(0.30);
   }
 
-  // Center hint in WAIT
-  if (STATE === S.WAIT) {
-    drawCenterHint("Ansitz…");
+  // BG load debug (only if failed)
+  if (bgFailed) {
+    drawTopDebug("BG failed to load. Check URL/path.");
   }
-
-  // Small pulse on prompt card via CSS not possible here; we slightly tint via overlay
-  drawUIShade();
 }
 
 function drawBackground() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
   if (bgReady) {
-    drawImageCover(bgImg, 0, 0, canvas.width, canvas.height);
-  } else {
-    // fallback if image not loaded yet
-    const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    g.addColorStop(0, "#1c2d2a");
-    g.addColorStop(0.4, "#163d2a");
-    g.addColorStop(1, "#0c160f");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawImageCover(bgImg, 0, 0, w, h);
+    return;
   }
+
+  // fallback
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, "#1c2d2a");
+  g.addColorStop(0.4, "#163d2a");
+  g.addColorStop(1, "#0c160f");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
 }
 
-// Atmosphere overlay (dust + soft haze)
 function drawAtmosphere() {
-  // Haze
-  const cx = canvas.width * 0.5;
-  const cy = canvas.height * 0.62;
-  const haze = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.min(canvas.width, canvas.height) * 0.85);
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  // haze
+  const cx = w * 0.5;
+  const cy = h * 0.62;
+  const haze = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.min(w, h) * 0.85);
   haze.addColorStop(0, "rgba(255, 235, 160, 0.10)");
   haze.addColorStop(0.55, "rgba(90, 200, 120, 0.06)");
   haze.addColorStop(1, "rgba(0,0,0,0.0)");
   ctx.fillStyle = haze;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, w, h);
 
-  // Dust particles
+  // dust
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.35)";
   for (const p of dust) {
@@ -369,22 +347,29 @@ function drawAtmosphere() {
     ctx.fill();
   }
   ctx.restore();
+
+  // top readability shade
+  const top = ctx.createLinearGradient(0, 0, 0, 160);
+  top.addColorStop(0, "rgba(0,0,0,0.35)");
+  top.addColorStop(1, "rgba(0,0,0,0.0)");
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, w, 160);
 }
 
-// Focus area for encounter (helps readability)
 function drawEncounterFocus() {
-  const cx = canvas.width * 0.5;
-  const cy = canvas.height * 0.62;
-  const rg = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.min(canvas.width, canvas.height) * 0.45);
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const cx = w * 0.5;
+  const cy = h * 0.62;
+  const rg = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.min(w, h) * 0.45);
   rg.addColorStop(0, "rgba(0,0,0,0.00)");
   rg.addColorStop(0.55, "rgba(0,0,0,0.18)");
   rg.addColorStop(1, "rgba(0,0,0,0.45)");
   ctx.fillStyle = rg;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, w, h);
 }
 
 function drawAnimalPlaceholder(a) {
-  // Placeholder “sprite” (until real PNGs are ready)
   const base =
     a.type === "deer" ? "#d28b3c" :
     a.type === "boar" ? "#6b5a4a" :
@@ -395,19 +380,17 @@ function drawAnimalPlaceholder(a) {
   ctx.save();
   ctx.translate(a.x, a.y);
 
-  // subtle bob
   const bob = Math.sin(a.wobble) * 3;
   ctx.translate(0, bob);
 
   ctx.scale(a.scale, a.scale);
 
-  // shadow (inside contour only)
+  // body shadow (inside only)
   ctx.fillStyle = "rgba(0,0,0,0.20)";
   ctx.beginPath();
   ctx.ellipse(0, 60, 70, 18, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // body
   ctx.fillStyle = base;
   ctx.strokeStyle = outline;
   ctx.lineWidth = 6;
@@ -424,7 +407,7 @@ function drawAnimalPlaceholder(a) {
     roundRect(-60 + i * 36, 30, 16, 58, 8, true, true);
   }
 
-  // antlers for deer
+  // antlers
   if (a.type === "deer") {
     ctx.strokeStyle = "rgba(0,0,0,0.35)";
     ctx.lineWidth = 6;
@@ -434,47 +417,38 @@ function drawAnimalPlaceholder(a) {
     ctx.stroke();
   }
 
-  // small alert wink (for encounter)
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.beginPath();
-  ctx.arc(58, -40, 4, 0, Math.PI * 2);
-  ctx.fill();
-
   ctx.restore();
 }
 
 function drawScopeOverlay() {
-  const cx = canvas.width * 0.5;
-  const cy = canvas.height * 0.52;
-  const r = Math.min(canvas.width, canvas.height) * 0.30;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const cx = w * 0.5;
+  const cy = h * 0.52;
+  const r = Math.min(w, h) * 0.30;
 
-  // Dark mask
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,0.62)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, w, h);
 
-  // Clear circle
   ctx.globalCompositeOperation = "destination-out";
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalCompositeOperation = "source-over";
 
-  // Scope ring
   ctx.strokeStyle = "rgba(0,0,0,0.85)";
   ctx.lineWidth = 7;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Inner soft ring
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(cx, cy, r - 8, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Crosshair
   ctx.strokeStyle = "rgba(255,255,255,0.35)";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -482,7 +456,6 @@ function drawScopeOverlay() {
   ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
   ctx.stroke();
 
-  // Tiny center dot
   ctx.fillStyle = "rgba(255,255,255,0.55)";
   ctx.beginPath();
   ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
@@ -491,40 +464,31 @@ function drawScopeOverlay() {
   ctx.restore();
 }
 
-// Vignette overlay
-function drawVignette(strength = 0.45) {
-  const cx = canvas.width * 0.5;
-  const cy = canvas.height * 0.55;
-  const rad = Math.max(canvas.width, canvas.height) * 0.8;
+function drawVignette(strength = 0.35) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const cx = w * 0.5;
+  const cy = h * 0.55;
+  const rad = Math.max(w, h) * 0.8;
   const vg = ctx.createRadialGradient(cx, cy, rad * 0.10, cx, cy, rad);
   vg.addColorStop(0, "rgba(0,0,0,0.0)");
   vg.addColorStop(1, `rgba(0,0,0,${strength})`);
   ctx.fillStyle = vg;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, w, h);
 }
 
-function drawCenterHint(text) {
+function drawTopDebug(text) {
+  const w = window.innerWidth;
   ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
-  roundRect(canvas.width * 0.5 - 130, canvas.height * 0.5 - 28, 260, 56, 16, true, false);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  roundRect(12, 200, Math.min(520, w - 24), 44, 12, true, false);
   ctx.fillStyle = "#fff";
-  ctx.font = "900 18px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText(text, canvas.width * 0.5, canvas.height * 0.5 + 6);
+  ctx.font = "900 14px system-ui";
+  ctx.textAlign = "left";
+  ctx.fillText(text, 24, 228);
   ctx.restore();
 }
 
-// Gentle shade behind HUD area for readability (only top)
-function drawUIShade() {
-  const h = 160;
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, "rgba(0,0,0,0.35)");
-  g.addColorStop(1, "rgba(0,0,0,0.0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, canvas.width, h);
-}
-
-// ---------- geometry helpers ----------
 function roundRect(x, y, w, h, r, fill, stroke) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
