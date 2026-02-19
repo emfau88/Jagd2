@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>Jagd2 – Revier</title>
+<title>Jagd2</title>
 <style>
   html, body {
     margin: 0;
@@ -12,6 +12,7 @@
     overflow: hidden;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   canvas {
@@ -23,8 +24,8 @@
     z-index: 0;
   }
 
-  /* HUD Layer */
-  #hud, #prompt, #hint, #actions {
+  /* UI layers */
+  #hud, #prompt, #hint, #actions, #err {
     position: absolute;
     left: 0;
     right: 0;
@@ -33,76 +34,89 @@
 
   #hud {
     top: 0;
-    padding: 12px 12px 0;
+    padding: 10px 10px 0;
     pointer-events: none;
   }
 
-  .card {
-    background: rgba(0,0,0,0.38);
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 14px;
-    backdrop-filter: blur(6px);
-    padding: 10px 12px;
-    color: #fff;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-  }
-
-  .row {
-    display:flex;
-    align-items:center;
-    justify-content:flex-start;
-    gap:10px;
+  /* HUD Pills use your black button as background */
+  .pillRow {
+    display: flex;
     flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-start;
   }
 
   .pill {
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.10);
-    border: 1px solid rgba(255,255,255,0.10);
-    font-weight: 800;
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    min-height: 34px;
+
+    background-image: url("buttonblack.png");
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+
+    color: rgba(255,255,255,0.95);
+    font-weight: 900;
     font-size: 13px;
-    white-space: nowrap;
+    letter-spacing: 0.2px;
   }
 
-  .label { opacity: 0.85; font-weight: 800; font-size: 12px; }
-  .value { font-weight: 900; font-size: 14px; }
+  .pill .label {
+    opacity: 0.88;
+    font-weight: 800;
+    font-size: 12px;
+  }
+  .pill .value {
+    font-weight: 950;
+    font-size: 13px;
+  }
 
   #prompt {
-    top: 96px;
-    display:flex;
-    justify-content:center;
-    pointer-events: none;
+    top: 88px;
     padding: 0 12px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
   }
-  #prompt .card {
-    max-width: 640px;
-    width: 100%;
-    text-align:center;
+
+  /* Prompt panel also uses black asset for consistency */
+  #promptBox {
+    width: min(680px, calc(100% - 24px));
+    padding: 12px 16px;
+
+    background-image: url("buttonblack.png");
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+
+    text-align: center;
+    color: #fff;
+    font-weight: 950;
     font-size: 18px;
-    font-weight: 900;
+    letter-spacing: 0.2px;
   }
 
   #hint {
-    bottom: 78px;
-    display:flex;
-    justify-content:center;
-    pointer-events: none;
+    bottom: 84px;
     padding: 0 12px;
-    opacity: 0.95;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
   }
-  #hint span {
-    background: rgba(0,0,0,0.35);
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 999px;
-    padding: 8px 12px;
+
+  #hintBox {
+    padding: 10px 14px;
+
+    background-image: url("buttonblack.png");
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+
     color: rgba(255,255,255,0.92);
-    font-weight: 800;
+    font-weight: 850;
     font-size: 12px;
-    backdrop-filter: blur(6px);
   }
 
   #actions {
@@ -114,27 +128,67 @@
     pointer-events: auto;
   }
 
-  button {
+  /* Image buttons */
+  .imgBtn {
     appearance: none;
     border: 0;
+    background: transparent;
+    padding: 0;
+    height: 54px;
     border-radius: 16px;
-    padding: 14px 12px;
-    font-weight: 900;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .imgBtn::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    transform: translateZ(0);
+  }
+
+  .imgBtn .txt {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    height: 100%;
+    font-weight: 950;
     font-size: 16px;
-    color: #0b0f0c;
-    background: #f2c94c;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.35);
-    pointer-events: auto;
+    letter-spacing: 0.2px;
+    user-select: none;
   }
 
-  button.secondary {
-    background: rgba(255,255,255,0.16);
+  /* Primary / Secondary skins */
+  #btnPrimary::before { background-image: url("buttonyellow.png"); }
+  #btnPrimary .txt { color: #10110c; text-shadow: 0 1px 0 rgba(255,255,255,0.35); }
+
+  #btnSecondary::before { background-image: url("buttonblack.png"); }
+  #btnSecondary .txt { color: rgba(255,255,255,0.92); text-shadow: 0 1px 0 rgba(0,0,0,0.45); }
+
+  /* Press feedback (no extra assets needed) */
+  .imgBtn:active::before { transform: translateY(1px) scale(0.995); filter: brightness(0.95); }
+  .imgBtn:active .txt { transform: translateY(1px); }
+
+  /* Error overlay */
+  #err {
+    top: 140px;
+    padding: 0 12px;
+    display: none;
+    pointer-events: none;
+  }
+  #errBox {
+    padding: 10px 12px;
+    background: rgba(80,0,0,0.55);
+    border: 1px solid rgba(255,120,120,0.35);
+    border-radius: 12px;
     color: #fff;
-    border: 1px solid rgba(255,255,255,0.16);
-    box-shadow: none;
+    font-weight: 800;
+    font-size: 12px;
+    white-space: pre-wrap;
   }
-
-  button:active { transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -142,30 +196,33 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div class="card">
-    <div class="row">
-      <div class="pill"><span class="label">💰 Coins</span><span id="coins" class="value">0</span></div>
-      <div class="pill"><span class="label">⚠ Druck</span><span id="pressure" class="value">0.00</span></div>
-      <div class="pill"><span class="label">🕒</span><span id="tod" class="value">06:00</span></div>
-      <div class="pill"><span class="label">🌬</span><span id="wind" class="value">NE</span></div>
-      <div class="pill"><span class="label">Pop</span><span id="pop" class="value">D12 B6 E18</span></div>
-    </div>
+  <div class="pillRow">
+    <div class="pill"><span class="label">💰 Coins</span><span id="coins" class="value">0</span></div>
+    <div class="pill"><span class="label">⚠ Druck</span><span id="pressure" class="value">0.00</span></div>
+    <div class="pill"><span class="label">🕒</span><span id="tod" class="value">06:00</span></div>
+    <div class="pill"><span class="label">🌬 Wind</span><span id="wind" class="value">NE</span></div>
+    <div class="pill"><span class="label">Pop</span><span id="pop" class="value">D12 B6 E18</span></div>
   </div>
 </div>
 
 <div id="prompt">
-  <div class="card" id="promptText">Tippe „Vorbereiten“</div>
+  <div id="promptBox">Tippe „Vorbereiten“</div>
 </div>
 
 <div id="hint">
-  <span id="hintText">Tipp: Im Encounter links = Verschonen, rechts = Schießen</span>
+  <div id="hintBox">Tipp: Im Encounter links = Verschonen, rechts = Schießen</div>
 </div>
 
 <div id="actions">
-  <button id="btnPrimary">Vorbereiten</button>
-  <button id="btnSecondary" class="secondary">Info</button>
+  <button id="btnPrimary" class="imgBtn" type="button"><div class="txt" id="btnPrimaryText">Vorbereiten</div></button>
+  <button id="btnSecondary" class="imgBtn" type="button"><div class="txt" id="btnSecondaryText">Info</div></button>
 </div>
 
-<script src="game.js"></script>
+<div id="err">
+  <div id="errBox"></div>
+</div>
+
+<!-- cache-bust -->
+<script src="game.js?v=9"></script>
 </body>
 </html>
